@@ -1,0 +1,50 @@
+Inspired by - https://github.com/opersys/opersys-hal-hw - Thanks!
+
+=================Add New Hardware HAL into Lollipop 5.0.1======================
+
+------------------------------File changes-------------------------------------
+
+This dir tree shows how to add New Hardware HAL into Lollipop 5.0.1
+
+1) Create all new files below in the dir tree
+
+2) Edit all files to contain everything:
+  *) Surounded with ADDED-BY-NAYOBIX section in dir tree
+  *) Everywhere `SensorHubMgmt` is mentioned
+
+
+*) Part in hardware/libhardware/modules/sensorhubmgmt may be moved to
+   hardware/<VENDOR>/libsensorhub-mgmt/
+
+------------------------------Compilation--------------------------------------
+
+After the new dir structure is added then execute:
+
+1) make update-api #Update already changed Android API
+2) lunch full_grouper-userdebug
+3) make -j8
+
+
+After the system.img is ready then you need new SDK which will you use it 
+in Eclipse
+
+1) lunch sdk-eng
+2) make sdk -j8
+3) The new Android SDK will be placed in out/host/linux-x86/sdk/sdk
+4) Import it for the specific project as external JAR, or replace the
+   overall Android SDK used by Eclipse
+
+
+--------------------------Application Usage------------------------------------
+import android.os.SensorHubMgmtManager;
+...
+
+try {
+    SensorHubMgmtManager om = (SensorHubMgmtManager) getSystemService(Context.SENSORHUBMGMT_SERVICE);
+
+    Log.d(TAG, "SensorHubMgmtManager.write: Hello World!");
+    int ret = om.write("Hello World!");
+    Log.d(TAG, "SensorHubMgmtManager.read returned: " + om.read(20) + " ret = " + ret);
+} catch (Exception ex) {
+    Log.d(TAG, "Error in SensorHubMgmt Service: " + ex.toString());
+}

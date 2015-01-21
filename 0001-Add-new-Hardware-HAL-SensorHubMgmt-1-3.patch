@@ -1,0 +1,396 @@
+From ad4917c5d2f67aae7d4e921e0f84af06976e12bf Mon Sep 17 00:00:00 2001
+From: Boyan Vladinov <nayobix@nayobix.org>
+Date: Wed, 21 Jan 2015 14:22:11 +0200
+Subject: [PATCH] Add new Hardware HAL - SensorHubMgmt - [1/3]
+
+Signed-off-by: Boyan Vladinov <nayobix@nayobix.org>
+---
+ Android.mk                                         |  1 +
+ api/current.txt                                    | 17 ++++
+ core/java/android/app/ContextImpl.java             | 13 ++++
+ core/java/android/content/Context.java             |  5 ++
+ core/java/android/os/ISensorHubMgmtService.aidl    | 13 ++++
+ core/java/android/os/SensorHubMgmtManager.java     | 29 +++++++
+ .../com/android/server/SensorHubMgmtService.java   | 45 +++++++++++
+ services/core/jni/Android.mk                       |  1 +
+ .../com_android_server_SensorHubMgmtService.cpp    | 90 ++++++++++++++++++++++
+ services/core/jni/onload.cpp                       |  2 +
+ services/java/com/android/server/SystemServer.java | 10 +++
+ 11 files changed, 226 insertions(+)
+ create mode 100644 core/java/android/os/ISensorHubMgmtService.aidl
+ create mode 100644 core/java/android/os/SensorHubMgmtManager.java
+ create mode 100644 services/core/java/com/android/server/SensorHubMgmtService.java
+ create mode 100644 services/core/jni/com_android_server_SensorHubMgmtService.cpp
+
+diff --git a/Android.mk b/Android.mk
+index 22cc27b..1c50e67 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -202,6 +202,7 @@ LOCAL_SRC_FILES += \
+ 	core/java/android/os/IUpdateLock.aidl \
+ 	core/java/android/os/IUserManager.aidl \
+ 	core/java/android/os/IVibratorService.aidl \
++	core/java/android/os/ISensorHubMgmtService.aidl \
+ 	core/java/android/service/notification/INotificationListener.aidl \
+ 	core/java/android/service/notification/IStatusBarNotificationHolder.aidl \
+ 	core/java/android/service/notification/IConditionListener.aidl \
+diff --git a/api/current.txt b/api/current.txt
+index fe0c209..112e28e 100644
+--- a/api/current.txt
++++ b/api/current.txt
+@@ -7237,6 +7237,7 @@ package android.content {
+     field public static final java.lang.String PRINT_SERVICE = "print";
+     field public static final java.lang.String RESTRICTIONS_SERVICE = "restrictions";
+     field public static final java.lang.String SEARCH_SERVICE = "search";
++    field public static final java.lang.String SENSORHUBMGMT_SERVICE = "sensorhubmgmt";
+     field public static final java.lang.String SENSOR_SERVICE = "sensor";
+     field public static final java.lang.String STORAGE_SERVICE = "storage";
+     field public static final java.lang.String TELECOM_SERVICE = "telecom";
+@@ -21776,6 +21777,16 @@ package android.os {
+     method public abstract android.os.IBinder asBinder();
+   }
+ 
++  public abstract interface ISensorHubMgmtService implements android.os.IInterface {
++  }
++
++  public static abstract class ISensorHubMgmtService.Stub extends android.os.Binder implements android.os.ISensorHubMgmtService {
++    ctor public ISensorHubMgmtService.Stub();
++    method public android.os.IBinder asBinder();
++    method public static android.os.ISensorHubMgmtService asInterface(android.os.IBinder);
++    method public boolean onTransact(int, android.os.Parcel, android.os.Parcel, int) throws android.os.RemoteException;
++  }
++
+   public final class Looper {
+     method public void dump(android.util.Printer, java.lang.String);
+     method public static android.os.Looper getMainLooper();
+@@ -22185,6 +22196,12 @@ package android.os {
+     field public static final android.os.Parcelable.Creator CREATOR;
+   }
+ 
++  public class SensorHubMgmtManager {
++    ctor public SensorHubMgmtManager(android.os.ISensorHubMgmtService);
++    method public java.lang.String read(int);
++    method public int write(java.lang.String);
++  }
++
+   public class StatFs {
+     ctor public StatFs(java.lang.String);
+     method public deprecated int getAvailableBlocks();
+diff --git a/core/java/android/app/ContextImpl.java b/core/java/android/app/ContextImpl.java
+index 7fafc38..10ef6de 100644
+--- a/core/java/android/app/ContextImpl.java
++++ b/core/java/android/app/ContextImpl.java
+@@ -145,6 +145,11 @@ import android.app.admin.DevicePolicyManager;
+ import android.app.job.IJobScheduler;
+ import android.app.trust.TrustManager;
+ 
++// ***** <ADDED-BY-MMS> *****
++import android.os.ISensorHubMgmtService;
++import android.os.SensorHubMgmtManager;
++// ***** </ADDED-BY-MMS> *****
++
+ import com.android.internal.annotations.GuardedBy;
+ import com.android.internal.app.IAppOpsService;
+ import com.android.internal.os.IDropBoxManagerService;
+@@ -473,6 +478,14 @@ class ContextImpl extends Context {
+                     return new KeyguardManager();
+                 }});
+ 
++        registerService(SENSORHUBMGMT_SERVICE, new ServiceFetcher() {
++                public Object getService(ContextImpl ctx) {
++                    IBinder b = ServiceManager.getService(SENSORHUBMGMT_SERVICE);
++                    ISensorHubMgmtService service = ISensorHubMgmtService.Stub.asInterface(b);
++                    return new SensorHubMgmtManager(service);
++                }});
++
++
+         registerService(LAYOUT_INFLATER_SERVICE, new ServiceFetcher() {
+                 public Object createService(ContextImpl ctx) {
+                     return PolicyManager.makeNewLayoutInflater(ctx.getOuterContext());
+diff --git a/core/java/android/content/Context.java b/core/java/android/content/Context.java
+index c9b7d0a..6de99d8 100644
+--- a/core/java/android/content/Context.java
++++ b/core/java/android/content/Context.java
+@@ -2141,6 +2141,7 @@ public abstract class Context {
+             MEDIA_SESSION_SERVICE,
+             BATTERY_SERVICE,
+             JOB_SCHEDULER_SERVICE,
++            SENSORHUBMGMT_SERVICE,
+     })
+     @Retention(RetentionPolicy.SOURCE)
+     public @interface ServiceName {}
+@@ -2692,6 +2693,10 @@ public abstract class Context {
+      */
+     public static final String BATTERY_SERVICE = "batterymanager";
+ 
++    /*** <ADDED-BY-MMS> ***/
++    public static final String SENSORHUBMGMT_SERVICE = "sensorhubmgmt";
++    /*** </ADDED-BY-MMS> ***/
++
+     /**
+      * Use with {@link #getSystemService} to retrieve a
+      * {@link android.nfc.NfcManager} for using NFC.
+diff --git a/core/java/android/os/ISensorHubMgmtService.aidl b/core/java/android/os/ISensorHubMgmtService.aidl
+new file mode 100644
+index 0000000..5e50e12
+--- /dev/null
++++ b/core/java/android/os/ISensorHubMgmtService.aidl
+@@ -0,0 +1,13 @@
++package android.os;
++
++interface ISensorHubMgmtService {
++    /**
++    * {@hide}
++    */
++    String read(int maxLength);
++
++    /**
++    * {@hide}
++    */
++    int write(String mString);
++}
+diff --git a/core/java/android/os/SensorHubMgmtManager.java b/core/java/android/os/SensorHubMgmtManager.java
+new file mode 100644
+index 0000000..91ee31e
+--- /dev/null
++++ b/core/java/android/os/SensorHubMgmtManager.java
+@@ -0,0 +1,29 @@
++package android.os;
++import android.os.ISensorHubMgmtService;
++import android.util.Log;
++
++public class SensorHubMgmtManager
++{
++    ISensorHubMgmtService mService;
++    private static final String TAG = "SensorHubMgmtManager";
++
++    public String read(int maxLength) {
++        try {
++            return mService.read(maxLength);
++        } catch (RemoteException e) {
++            Log.e(TAG, "Excpetion in read: " + e.toString());
++            return null;
++        }
++    }
++    public int write(String mString) {
++        try {
++            return mService.write(mString);
++        } catch (RemoteException e) {
++            Log.e(TAG, "Excpetion in write: " + e.toString());
++            return 0;
++        }
++    }
++    public SensorHubMgmtManager(ISensorHubMgmtService service) {
++        mService = service;
++    }
++}
+diff --git a/services/core/java/com/android/server/SensorHubMgmtService.java b/services/core/java/com/android/server/SensorHubMgmtService.java
+new file mode 100644
+index 0000000..5f95d81
+--- /dev/null
++++ b/services/core/java/com/android/server/SensorHubMgmtService.java
+@@ -0,0 +1,45 @@
++package com.android.server.sensorhubmgmt;
++
++import android.content.Context;
++import android.os.Handler;
++import android.os.ISensorHubMgmtService;
++import android.os.Looper;
++import android.os.Message;
++import android.os.Process;
++import android.util.Log;
++
++public class SensorHubMgmtService extends ISensorHubMgmtService.Stub {
++
++    private static final String TAG = "SensorHubMgmtService";
++    private Context mContext;
++    private int mNativePointer;
++
++    public SensorHubMgmtService(Context context) {
++        super();
++        mContext = context;
++        Log.i(TAG, "SensorHubMgmtService started");
++        mNativePointer = init_native();
++        Log.i(TAG, "test() returns " + test_native(mNativePointer, 20));
++    }
++    protected void finalize() throws Throwable {
++        finalize_native(mNativePointer);
++        super.finalize();
++    }
++    public String read(int maxLength)
++    {
++        int length;
++        byte[] buffer = new byte[maxLength];
++        length = read_native(mNativePointer, buffer);
++        return new String(buffer, 0, length);
++    }
++    public int write(String mString)
++    {
++        byte[] buffer = mString.getBytes();
++        return write_native(mNativePointer, buffer);
++    }
++    private static native int init_native();
++    private static native void finalize_native(int ptr);
++    private static native int read_native(int ptr, byte[] buffer);
++    private static native int write_native(int ptr, byte[] buffer);
++    private static native int test_native(int ptr, int value);
++}
+diff --git a/services/core/jni/Android.mk b/services/core/jni/Android.mk
+index d81cdd9..3db9fc9 100644
+--- a/services/core/jni/Android.mk
++++ b/services/core/jni/Android.mk
+@@ -25,6 +25,7 @@ LOCAL_SRC_FILES += \
+     $(LOCAL_REL_DIR)/com_android_server_UsbHostManager.cpp \
+     $(LOCAL_REL_DIR)/com_android_server_VibratorService.cpp \
+     $(LOCAL_REL_DIR)/com_android_server_PersistentDataBlockService.cpp \
++    $(LOCAL_REL_DIR)/com_android_server_SensorHubMgmtService.cpp \
+     $(LOCAL_REL_DIR)/onload.cpp
+ 
+ include external/stlport/libstlport.mk
+diff --git a/services/core/jni/com_android_server_SensorHubMgmtService.cpp b/services/core/jni/com_android_server_SensorHubMgmtService.cpp
+new file mode 100644
+index 0000000..ac0cc8e
+--- /dev/null
++++ b/services/core/jni/com_android_server_SensorHubMgmtService.cpp
+@@ -0,0 +1,90 @@
++#define LOG_TAG "SensorHubMgmtServiceJNI"                                           
++#include "utils/Log.h"
++
++#include "jni.h"
++#include "JNIHelp.h"
++#include "android_runtime/AndroidRuntime.h"
++#include <utils/misc.h>
++#include <hardware/hardware.h>
++#include <hardware/sensorhubmgmt.h>
++#include <stdio.h>
++
++namespace android
++{
++    sensorhubmgmt_device_t* sensorhubmgmt_dev;
++
++    static jint init_native(JNIEnv *env, jobject clazz)
++    {
++        int err;
++        hw_module_t* module;
++        sensorhubmgmt_device_t* dev = NULL;
++        err = hw_get_module(SENSORHUBMGMT_HARDWARE_MODULE_ID, (hw_module_t const**)&module);
++        if (err == 0) {
++            if (module->methods->open(module, "", ((hw_device_t**) &dev)) != 0) {
++                ALOGE("Couldn't load %s module (%s)", SENSORHUBMGMT_HARDWARE_MODULE_ID, strerror(-err));
++                return 0;
++            }
++        } else {
++                ALOGE("Couldn't hw_get_module %s module. Error (%s)", SENSORHUBMGMT_HARDWARE_MODULE_ID, strerror(-err));
++        }
++        return (jint)dev;
++    }
++    static void finalize_native(JNIEnv *env, jobject clazz, int ptr)
++    {
++        sensorhubmgmt_device_t* dev = (sensorhubmgmt_device_t*)ptr;
++        if (dev == NULL) {
++            ALOGE("Error in finalize_native. dev == NULL\n");
++            return;
++        }
++        free(dev);
++    }
++    static int read_native(JNIEnv *env, jobject clazz, int ptr, jbyteArray buffer)
++    {
++        sensorhubmgmt_device_t* dev = (sensorhubmgmt_device_t*)ptr;
++        jbyte* real_byte_array;
++        int length;
++        real_byte_array = env->GetByteArrayElements(buffer, NULL);
++        if (dev == NULL) {
++            ALOGE("Error in read_native. dev == NULL\n");
++            return 0;
++        }
++        length = dev->read((char*) real_byte_array, env->GetArrayLength(buffer));
++        env->ReleaseByteArrayElements(buffer, real_byte_array, 0);
++        return length;
++    }
++    static int write_native(JNIEnv *env, jobject clazz, int ptr, jbyteArray buffer)
++    {
++        sensorhubmgmt_device_t* dev = (sensorhubmgmt_device_t*)ptr;
++        jbyte* real_byte_array;
++        int length;
++        real_byte_array = env->GetByteArrayElements(buffer, NULL);
++        if (dev == NULL) {
++            ALOGE("Error in write_native. dev == NULL\n");
++            return 0;
++        }
++        length = dev->write((char*) real_byte_array, env->GetArrayLength(buffer));
++        env->ReleaseByteArrayElements(buffer, real_byte_array, 0);
++        return length;
++    }
++    static int test_native(JNIEnv *env, jobject clazz, int ptr, int value)
++    {
++        sensorhubmgmt_device_t* dev = (sensorhubmgmt_device_t*)ptr;
++        if (dev == NULL) {
++            ALOGE("Error in test_native. dev == NULL\n");
++            return 0;
++        }
++        return dev->test(value);
++    }
++    static JNINativeMethod method_table[] = {
++        { "init_native", "()I", (void*)init_native },
++        { "finalize_native", "(I)V", (void*)finalize_native },
++        { "read_native", "(I[B)I", (void*)read_native },
++        { "write_native", "(I[B)I", (void*)write_native },
++        { "test_native", "(II)I", (void*)test_native},
++    };
++    int register_android_server_SensorHubMgmtService(JNIEnv *env)
++    {
++        return jniRegisterNativeMethods(env, "com/android/server/sensorhubmgmt/SensorHubMgmtService",
++        method_table, NELEM(method_table));
++    };
++};
+diff --git a/services/core/jni/onload.cpp b/services/core/jni/onload.cpp
+index 7b2e408..56028fe 100644
+--- a/services/core/jni/onload.cpp
++++ b/services/core/jni/onload.cpp
+@@ -42,6 +42,7 @@ int register_android_server_tv_TvInputHal(JNIEnv* env);
+ int register_android_server_PersistentDataBlockService(JNIEnv* env);
+ int register_android_server_fingerprint_FingerprintService(JNIEnv* env);
+ int register_android_server_Watchdog(JNIEnv* env);
++int register_android_server_SensorHubMgmtService(JNIEnv* env);
+ };
+ 
+ using namespace android;
+@@ -79,6 +80,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
+     register_android_server_PersistentDataBlockService(env);
+     register_android_server_fingerprint_FingerprintService(env);
+     register_android_server_Watchdog(env);
++    register_android_server_SensorHubMgmtService(env);
+ 
+     return JNI_VERSION_1_4;
+ }
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 92ad1ad..942193c 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -97,6 +97,7 @@ import com.android.server.usb.UsbService;
+ import com.android.server.wallpaper.WallpaperManagerService;
+ import com.android.server.webkit.WebViewUpdateService;
+ import com.android.server.wm.WindowManagerService;
++import com.android.server.sensorhubmgmt.SensorHubMgmtService;
+ 
+ import dalvik.system.VMRuntime;
+ 
+@@ -851,6 +852,15 @@ public final class SystemServer {
+                 reportWtf("starting DiskStats Service", e);
+             }
+ 
++           // ***** <ADDED-BY-MMS> *****
++           try {
++               Slog.i(TAG, "SensorHubMgmt Service");
++               ServiceManager.addService(Context.SENSORHUBMGMT_SERVICE, new SensorHubMgmtService(context));
++           } catch (Throwable e) {
++               Slog.e(TAG, "Failure starting SensorHubMgmt Service", e);
++           }
++           // ***** </ADDED-BY-MMS> *****
++
+             try {
+                 // need to add this service even if SamplingProfilerIntegration.isEnabled()
+                 // is false, because it is this service that detects system property change and
+-- 
+2.0.0
+
