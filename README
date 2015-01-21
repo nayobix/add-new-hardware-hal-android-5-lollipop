@@ -12,6 +12,7 @@ This dir tree shows how to add New Hardware HAL into Lollipop 5.0.1
   *) Surounded with ADDED-BY-NAYOBIX section in dir tree
   *) Everywhere `SensorHubMgmt` is mentioned
 
+3) Check 0001-Add-new-Hardware-HAL-SensorHubMgmt-* patches for reference
 
 *) Part in hardware/libhardware/modules/sensorhubmgmt may be moved to
    hardware/<VENDOR>/libsensorhub-mgmt/
@@ -36,6 +37,7 @@ in Eclipse
 
 
 --------------------------Application Usage------------------------------------
+
 import android.os.SensorHubMgmtManager;
 ...
 
